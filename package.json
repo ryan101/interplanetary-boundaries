@@ -1,0 +1,15 @@
+{
+  "name": "kml-planet-scale",
+  "version": "1.0.0",
+  "description": "CLI that rescales KML polygon coordinates so their great-circle size on Earth is preserved when displayed on a body with a different radius.",
+  "main": "scale-kml.js",
+  "bin": {
+    "kml-planet-scale": "./scale-kml.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@tmcw/togeojson": "^7.1.2",
+    "@xmldom/xmldom": "^0.9.6",
+    "haversine-distance": "^1.2.4"
+  }
+}
