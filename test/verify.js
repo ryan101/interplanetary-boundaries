@@ -1,37 +1,32 @@
-"use strict";
+// Quick manual verification: confirms that the great-circle distance from
+// the anchor to every corner of the rectangle fixture is preserved in
+// physical meters between the Earth input and the Mars-scaled output -
+// including the SE corner, whose latitude differs from the anchor's (the
+// case the old per-axis approach got wrong).
 
-// Quick manual verification: confirms that the great-circle width (measured
-// at the anchor's latitude) and height (along the anchor's meridian) of the
-// rectangle fixture are preserved in physical meters between the Earth
-// input and the Mars-scaled output.
-
-const haversineDistance = require("haversine-distance");
+import LatLon from "geodesy/latlon-spherical.js";
 
 const EARTH_RADIUS = 6371000;
 const MARS_RADIUS = 3389500;
-const EARTH_RADIUS_USED_BY_HAVERSINE_LIB = 6378137;
 
-function centralAngle(a, b) {
-  return haversineDistance(a, b) / EARTH_RADIUS_USED_BY_HAVERSINE_LIB;
-}
-
-// Original (Earth) rectangle corners.
-const srcNW = { lat: 40, lon: -100 };
-const srcNE = { lat: 40, lon: -90 };
-const srcSW = { lat: 30, lon: -100 };
+// Original (Earth) rectangle corners; anchor is the NW corner.
+const srcAnchor = new LatLon(40, -100);
+const srcNE = new LatLon(40, -90);
+const srcSW = new LatLon(30, -100);
+const srcSE = new LatLon(30, -90);
 
 // Mars-scaled rectangle corners (from rectangle.mars.out.kml).
-const tgtNW = { lat: 40, lon: -100 };
-const tgtNE = { lat: 40, lon: -81.1784218148175 };
-const tgtSW = { lat: 21.203717362442838, lon: -100 };
+const tgtAnchor = new LatLon(40, -100);
+const tgtNE = new LatLon(39.29460089423017, -81.29788235439167);
+const tgtSW = new LatLon(21.20371736244283, -100);
+const tgtSE = new LatLon(20.685414524659247, -82.80114502325219);
 
-const srcWidthMeters = centralAngle(srcNW, srcNE) * EARTH_RADIUS;
-const tgtWidthMeters = centralAngle(tgtNW, tgtNE) * MARS_RADIUS;
+function report(label, srcPoint, tgtPoint) {
+  const srcMeters = srcAnchor.distanceTo(srcPoint, EARTH_RADIUS);
+  const tgtMeters = tgtAnchor.distanceTo(tgtPoint, MARS_RADIUS);
+  console.log(`${label}: Earth=${srcMeters.toFixed(3)} m, Mars=${tgtMeters.toFixed(3)} m, diff=${Math.abs(srcMeters - tgtMeters).toExponential(3)} m`);
+}
 
-const srcHeightMeters = centralAngle(srcNW, srcSW) * EARTH_RADIUS;
-const tgtHeightMeters = centralAngle(tgtNW, tgtSW) * MARS_RADIUS;
-
-console.log("Width  (Earth vs Mars, meters):", srcWidthMeters, tgtWidthMeters);
-console.log("Height (Earth vs Mars, meters):", srcHeightMeters, tgtHeightMeters);
-console.log("Width diff:", Math.abs(srcWidthMeters - tgtWidthMeters));
-console.log("Height diff:", Math.abs(srcHeightMeters - tgtHeightMeters));
+report("Anchor -> NE", srcNE, tgtNE);
+report("Anchor -> SW", srcSW, tgtSW);
+report("Anchor -> SE", srcSE, tgtSE);

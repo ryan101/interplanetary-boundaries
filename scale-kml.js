@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 
-"use strict";
+import fs from "fs";
+import path from "path";
+import { DOMParser } from "@xmldom/xmldom";
+import { kml as kmlToGeoJSON } from "@tmcw/togeojson";
 
-const fs = require("fs");
-const path = require("path");
-const { DOMParser } = require("@xmldom/xmldom");
-const { kml: kmlToGeoJSON } = require("@tmcw/togeojson");
-
-const { walkFeatureCollection } = require("./lib/geojson-walk");
-const { featureCollectionToKml } = require("./lib/write-kml");
-const { EARTH_MEAN_RADIUS_METERS, scaleCoordinate, computeDefaultAnchor } = require("./lib/scale");
+import { walkFeatureCollection } from "./lib/geojson-walk.js";
+import { featureCollectionToKml } from "./lib/write-kml.js";
+import { EARTH_MEAN_RADIUS_METERS, scaleCoordinate, computeCentroid } from "./lib/scale.js";
 
 const USAGE = `
 Usage: node scale-kml.js --input <file.kml> --output <file.kml> --target-radius <meters> [options]
@@ -29,8 +27,7 @@ Optional:
                               Defaults to Earth's mean radius (${EARTH_MEAN_RADIUS_METERS} m).
   --anchor "<lat>,<lon>"     Point that stays fixed while every other
                               coordinate is rescaled around it. Defaults to
-                              the north-west (upper-left) corner of the
-                              shape's bounding box.
+                              the centroid (geometric center) of all coordinates.
   -h, --help                 Show this help message.
 `;
 
@@ -119,25 +116,23 @@ function main() {
     fail("No features with coordinates were found in the input KML.");
   }
 
-  // ---- Determine the anchor point (fixed while everything else scales) ----
-  let anchor = anchorOverride;
-  if (!anchor) {
-    const allCoordinates = [];
-    walkFeatureCollection(geojson, (coord) => {
-      allCoordinates.push(coord);
-    });
-    anchor = computeDefaultAnchor(allCoordinates);
-  }
+  // ---- Compute the centroid of the polygon (always used as reference) ----
+  const centroid = computeCentroid(geojson);
 
-  // Scale factor: arc length = radius * central angle, so to keep the
-  // physical (great-circle) size of the shape constant while the radius
-  // changes from sourceRadius to targetRadius, every central angle must be
-  // multiplied by sourceRadius / targetRadius.
+  // ---- Determine where the centroid should move to (default: stay in place) ----
+  let anchor = anchorOverride || centroid;
+
+  // ---- Check if anchor crosses the equator (flip shape if it does) ----
+  const flipShape = (centroid.lat >= 0 && anchor.lat < 0) || (centroid.lat < 0 && anchor.lat >= 0);
+
+  // Scale factor, shown for informational purposes only - the actual
+  // scaling is done per-vertex in scaleCoordinate() using sourceRadius and
+  // targetRadius directly (see lib/scale.js).
   const k = args.sourceRadius / args.targetRadius;
 
-  // ---- Rescale every coordinate in place, relative to the anchor ----
+  // ---- Rescale every coordinate in place, relative to the centroid ----
   walkFeatureCollection(geojson, (coord) => {
-    const [newLon, newLat] = scaleCoordinate(coord[0], coord[1], anchor, k);
+    const [newLon, newLat] = scaleCoordinate(coord[0], coord[1], centroid, anchor, args.sourceRadius, args.targetRadius, flipShape);
     coord[0] = newLon;
     coord[1] = newLat;
     // coord[2] (altitude), if present, is left untouched.
@@ -148,7 +143,11 @@ function main() {
   fs.writeFileSync(args.output, outputKml, "utf8");
 
   console.log(`Scaled KML written to ${args.output}`);
+  console.log(`Centroid: lat=${centroid.lat}, lon=${centroid.lon}`);
   console.log(`Anchor: lat=${anchor.lat}, lon=${anchor.lon}`);
+  if (flipShape) {
+    console.log(`Shape flipped (crosses equator)`);
+  }
   console.log(`Scale factor (sourceRadius / targetRadius): ${k}`);
 }
 
