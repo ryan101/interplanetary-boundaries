@@ -1,9 +1,8 @@
 # kml-planet-scale
 
 A small Node.js command-line tool that rescales the coordinates in a KML
-file so that the **physical (great-circle) size** of its shapes is
-preserved when the same file is displayed on a body with a different
-radius.
+file so that the physical size of its shapes is preserved when the same
+file is displayed on a body with a different radius.
 
 ## The problem
 
@@ -12,7 +11,7 @@ not physical distances - one degree of longitude covers a very different
 physical distance on Earth (radius ≈ 6,371 km) than it does on Mars
 (radius ≈ 3,390 km). If you take a KML outline of, say, the continental
 United States and display it "as-is" on a Mars basemap, the shape will
-cover the *same range of degrees* but a much *smaller physical distance*,
+cover the same range of degrees but a much smaller physical distance,
 making it look far smaller than it should relative to the size of Mars.
 
 This tool rewrites every coordinate so the outline instead covers the same
@@ -35,105 +34,59 @@ To keep `distance` (the actual physical size, in meters) constant while
 has to change to match - `θ = distance / R`.
 
 Because scaling changes angular spans, a reference point is needed. This
-tool always uses the polygon's **centroid** (geometric center, computed by
-averaging all coordinates) as the reference. All vertices are scaled
-relative to the centroid on both the source and target bodies.
+tool always uses the polygon's centroid (geometric center, computed via
+spherical geometry using n-vectors) as the reference.
 
 ### Scaling every vertex: distance and bearing from the centroid
 
-Rather than picking an arbitrary anchor point, this tool computes the
-**centroid** (geometric center) of the polygon and uses it as the reference
-point for all scaling. For each vertex, the tool:
+This tool computes the centroid of the polygon and uses
+it as the reference point for all scaling. For each vertex, the tool:
 
-1. Measures the true great-circle **distance** (in meters) and **initial
-   bearing** (compass direction) from the centroid to that vertex, on the
+1. Measures the great-circle distance (in meters) and initial
+   bearing (compass direction) from the centroid to that vertex, on the
    source body (radius `sourceRadius`).
-2. Places a new vertex at that *same physical distance* and *same bearing*
+2. Places a new vertex at that same physical distance and same bearing
    from the anchor point, but computed on the target body (radius
    `targetRadius`).
 
 If no `--anchor` is supplied, the anchor defaults to the centroid itself,
 and the polygon scales uniformly in place around its center. If an `--anchor`
-is provided, the polygon is effectively **translated** so that its centroid
-moves to the anchor location while preserving all internal distances and
-angles.
-
-Since bearing (direction) doesn't depend on the sphere's radius, and
-distance = radius × angle, this keeps the exact physical distance and
-direction from the centroid to every vertex - the angular span simply grows
-or shrinks by whatever amount is needed to keep that distance the same on
-the new radius. There's no need to reason about latitude and longitude as
-separate axes, no reference-latitude approximation, and equator or
-antimeridian crossings need no special-case handling at all - they just
-fall out of standard spherical distance/bearing/destination-point
-formulas.
-
-This is implemented with the
-[`geodesy`](https://www.npmjs.com/package/geodesy) library's
-`LatLonSpherical` class (`distanceTo`, `initialBearingTo`,
-`destinationPoint`), which provides these as small, well-tested,
-dependency-free trigonometric functions. In code, this is:
-
-```
-const distance = centroid.distanceTo(vertex, sourceRadius);
-const bearing = centroid.initialBearingTo(vertex);
-const newVertex = anchor.destinationPoint(distance, bearing, targetRadius);
-```
-
-Altitude (a third `lon,lat,altitude` value), if present, is left
-untouched - only the horizontal position is rescaled.
-
-### Handling the equator and the antimeridian
-
-Because the transform above works directly with true great-circle
-distance and bearing (not independent latitude/longitude offsets), the
-underlying spherical trigonometry handles shapes that cross the equator
-correctly on its own.
-
-For antimeridian crossings (the 180°/-180° line), after each coordinate
-is scaled using `destinationPoint`, the resulting longitude is normalized
-to the (-180, 180] range to ensure correctness.
+is provided, the polygon is moved so that its centroid is the target anchor location.
+This is especially useful when moving to a smaller radius body causes the polygon to
+go over a pole or wrap around the entire body (e.g., USA on the moon). Moving the anchor
+closer to the equator provides greater distance for the polygon to fit within.
 
 **Equator crossing and shape inversion**: If the anchor point is on the
 opposite side of the equator from the centroid (e.g., centroid in the
 northern hemisphere but anchor in the southern), the entire shape is
 flipped by reversing all bearing directions (adding 180° to each bearing).
 This ensures that shapes maintain sensible orientation when moved across
-hemispheres.
+hemispheres. This is essentially makes the south pole the north pole
+and is only necessary for cosmetic reasons to keep the familiar shape
+of a polygon if then anchor changes hemishpere. This feature is not
+needed if you are able to arbitrarily rotate the polygon body
+indepently of your target body.
 
-### Default anchor: the centroid
+Altitude (a third `lon,lat,altitude` value), if present, is left
+untouched - only the horizontal position is rescaled.
 
-The centroid (geometric center) of the polygon is always computed and used
-as the reference point for rescaling. By default, the anchor point is the
-centroid itself, so the polygon scales uniformly around its own center.
-
-If `--anchor` is supplied, the polygon is translated such that its centroid
-moves to the anchor location while all vertices maintain their relative
-distances and angles from the centroid on the target body. This allows the
-shape to be repositioned and rescaled simultaneously.
-
-### A note on accuracy
-
-This method is exact for the distance and direction from the centroid to
-every vertex. Unlike scaling latitude/longitude as independent axes (which
-introduces up to double-digit percentage errors for vertices far from a
-reference latitude), measuring from a consistent centroid point avoids this
-problem. It does not claim to be a perfect conformal or equal-area map
-projection: distances measured *between two non-centroid vertices* are an
-extremely good approximation rather than a mathematical guarantee, since
-the sphere's curvature is subtly different at the two radii. For real-world
-shapes (country outlines, etc.) relative to a single fixed centroid, this
-difference is negligible.
+This is implemented with the
+[`geodesy`](https://www.npmjs.com/package/geodesy) library's
+`LatLonNvectorSpherical` class (using n-vectors for centroid computation and
+great-circle distance/bearing/destination calculations). The centroid is
+computed using `LatLon.centreOf()`, which calculates the true spherical
+geometric center via 3D vector averaging.
 
 ## Installation
 
-```
+``` bash
+git clone https://github.com/ryan101/interplanetary-boundaries.git
 npm install
 ```
 
 ## Usage
 
-```
+``` bash
 node scale-kml.js --input <file.kml> --output <file.kml> --target-radius <meters> [options]
 ```
 
@@ -150,10 +103,10 @@ node scale-kml.js --input <file.kml> --output <file.kml> --target-radius <meters
 | Argument | Description |
 | --- | --- |
 | `--source-radius <meters>` | Radius, in meters, that the input coordinates were originally measured on. Defaults to Earth's mean radius, `6371000` m. |
-| `--anchor "<lat>,<lon>"` | The location where the polygon's centroid should be placed after rescaling. If omitted, the centroid stays in place and the polygon scales uniformly around it. Example: `--anchor "40,-100"` moves the shape's center to that location. |
+| `--anchor "<lat>,<lon>"` | The location where the polygon's centroid should be placed after rescaling. If omitted, the centroid stays in place and the polygon scales uniformly around it. Example: `--anchor "5,-100"` moves the shape's center to that location. |
 | `-h`, `--help` | Print usage information and exit. |
 
-All radii are in **meters**. Latitude/longitude values are in decimal
+All radii are in meters. Latitude/longitude values are in decimal
 degrees.
 
 ### Examples
@@ -185,34 +138,24 @@ node scale-kml.js --input moon-shape.kml --output shape-on-earth.kml --source-ra
 | File | Purpose |
 | --- | --- |
 | `scale-kml.js` | CLI entry point: argument parsing/validation, orchestrates read → transform → write. |
-| `lib/scale.js` | Core math: `scaleCoordinate` (per-vertex distance/bearing scaling from the polygon's centroid to each vertex, with optional bearing reversal for equator-crossing shape inversion, via the `geodesy` package), `computeCentroid` (geometric center of all coordinates), and `normalizeLonDeg` (antimeridian normalization). |
+| `lib/scale.js` | Core math: `scaleCoordinate` (per-vertex distance/bearing scaling from the polygon's centroid to each vertex, with optional bearing reversal for equator-crossing shape inversion), and `computeCentroid` (true spherical geometric center). |
 | `lib/geojson-walk.js` | Recursive helper that visits every `[lon, lat]`/`[lon, lat, alt]` coordinate in a GeoJSON `FeatureCollection`, across all geometry types. |
 | `lib/write-kml.js` | Minimal, dependency-free GeoJSON → KML serializer. |
-| `test/fixtures/*.kml` | Sample KML files used for manual verification (a plain rectangle, an antimeridian-crossing shape, an equator-crossing shape). |
-| `test/verify.js` | Ad hoc script that checks great-circle distance from the anchor to each rectangle corner is preserved between an Earth input and its Mars-scaled output. |
-
-This project uses native ES modules (`"type": "module"` in `package.json`).
 
 ## Notes and limitations
 
 - Only latitude and longitude are rescaled; altitude values pass through
   unchanged.
-- KML is read and written via a GeoJSON round-trip
-  (`@tmcw/togeojson` in, a small hand-written serializer out). Basic
+- KML is read and written via a GeoJSON round-trip. Basic
   shapes (`Point`, `LineString`, `Polygon` with holes, and their `Multi*`
   variants) and each placemark's `name`/`description` are preserved;
   other KML-specific extras (styles, extended data, folders, etc.) are
-  not currently carried through.
+  not carried through.
 - Distances and bearings are computed on a spherical earth model (not an
-  ellipsoidal one), which is the standard simplification used for this
-  kind of "how big does this look" comparison and is what the `geodesy`
-  package's `latlon-spherical` module provides.
-- See "A note on accuracy" above: exact from the centroid to every vertex,
-  an extremely good approximation between two arbitrary non-centroid
-  vertices.
-- Antimeridian crossings (shapes that span ±180° longitude) are handled
-  correctly: all scaled coordinates are normalized to the (-180, 180]
-  range.
+  ellipsoidal one) using n-vectors.
+- The centroid is computed using `LatLon.centreOf()`, which
+  produces the true spherical geometric center rather than an arithmetic mean
+  of angular coordinates.
 - When an anchor point crosses the equator relative to the polygon's
   centroid (i.e., they are on opposite sides of 0° latitude), the shape
   is automatically flipped by reversing all bearing directions.
